@@ -3,6 +3,19 @@
 #include <mysql/mysql.h>
 #include <fstream>
 
+//定义http响应的一些状态信息
+const char *ok_200_title = "OK";
+const char *error_400_title = "Bad Request";
+const char *error_400_form = "Your request has bad syntax or is inherently impossible to staisfy.\n";
+const char *error_403_title = "Forbidden";
+const char *error_403_form = "You do not have permission to get file form this server.\n";
+const char *error_404_title = "Not Found";
+const char *error_404_form = "The requested file was not found on this server.\n";
+const char *error_500_title = "Internal Error";
+const char *error_500_form = "There was an unusual problem serving the request file.\n";
+
+locker m_lock;
+
 void http_conn::initmysql_result(connection_pool *connPool, map<string, string> &users)
 {
     //先从连接池中取一个连接
@@ -129,7 +142,8 @@ void http_conn::close_conn(bool real_close)
 }
 
 //初始化连接,外部调用初始化套接字地址
-void http_conn::init(int sockfd, const sockaddr_in &addr, char *root, map<string, string> &users, int SQLVerify, int TRIGMode)
+void http_conn::init(int sockfd, const sockaddr_in &addr, char *root, map<string, string> &users, int SQLVerify, int TRIGMode,
+                     int close_log, string user, string passwd, string sqlname)
 {
     m_sockfd = sockfd;
     m_address = addr;
@@ -142,6 +156,11 @@ void http_conn::init(int sockfd, const sockaddr_in &addr, char *root, map<string
     m_users = users;
     m_SQLVerify = SQLVerify;
     m_TRIGMode = TRIGMode;
+    m_close_log = close_log;
+
+    strcpy(sql_user, user.c_str());
+    strcpy(sql_passwd, passwd.c_str());
+    strcpy(sql_name, sqlname.c_str());
 
     init();
 }
@@ -165,17 +184,6 @@ void http_conn::init()
     m_read_idx = 0;
     m_write_idx = 0;
     cgi = 0;
-
-    //定义http响应的一些状态信息
-    ok_200_title = "OK";
-    error_400_title = "Bad Request";
-    error_400_form = "Your request has bad syntax or is inherently impossible to staisfy.\n";
-    error_403_title = "Forbidden";
-    error_403_form = "You do not have permission to get file form this server.\n";
-    error_404_title = "Not Found";
-    error_404_form = "The requested file was not found on this server.\n";
-    error_500_title = "Internal Error";
-    error_500_form = "There was an unusual problem serving the request file.\n";
 
     memset(m_read_buf, '\0', READ_BUFFER_SIZE);
     memset(m_write_buf, '\0', WRITE_BUFFER_SIZE);
@@ -326,7 +334,6 @@ http_conn::HTTP_CODE http_conn::parse_headers(char *text)
     }
     else
     {
-        //printf("oop!unknow header: %s\n",text);
         LOG_INFO("oop!unknow header: %s", text);
         Log::get_instance()->flush();
     }
@@ -346,7 +353,6 @@ http_conn::HTTP_CODE http_conn::parse_content(char *text)
     return NO_REQUEST;
 }
 
-//
 http_conn::HTTP_CODE http_conn::process_read()
 {
     LINE_STATUS line_status = LINE_OK;
@@ -429,9 +435,6 @@ http_conn::HTTP_CODE http_conn::do_request()
 
         if (0 == m_SQLVerify)
         {
-            pthread_mutex_t lock;
-            pthread_mutex_init(&lock, NULL);
-
             if (*(p + 1) == '3')
             {
                 //如果是注册，先检测数据库中是否有重名的
@@ -446,11 +449,10 @@ http_conn::HTTP_CODE http_conn::do_request()
 
                 if (m_users.find(name) == m_users.end())
                 {
-
-                    pthread_mutex_lock(&lock);
+                    m_lock.lock();
                     int res = mysql_query(mysql, sql_insert);
                     m_users.insert(pair<string, string>(name, password));
-                    pthread_mutex_unlock(&lock);
+                    m_lock.unlock();
 
                     if (!res)
                         strcpy(m_url, "/log.html");
@@ -472,11 +474,7 @@ http_conn::HTTP_CODE http_conn::do_request()
         }
         else if (1 == m_SQLVerify)
         {
-
             //注册
-            pthread_mutex_t lock;
-            pthread_mutex_init(&lock, NULL);
-
             if (*(p + 1) == '3')
             {
                 //如果是注册，先检测数据库中是否有重名的
@@ -491,20 +489,20 @@ http_conn::HTTP_CODE http_conn::do_request()
 
                 if (m_users.find(name) == m_users.end())
                 {
-                    pthread_mutex_lock(&lock);
+                    m_lock.lock();
                     int res = mysql_query(mysql, sql_insert);
                     m_users.insert(pair<string, string>(name, password));
-                    pthread_mutex_unlock(&lock);
+                    m_lock.unlock();
 
                     if (!res)
                     {
                         strcpy(m_url, "/log.html");
-                        pthread_mutex_lock(&lock);
+                        m_lock.lock();
                         //每次都需要重新更新id_passwd.txt
                         ofstream out("./CGImysql/id_passwd.txt", ios::app);
                         out << name << " " << password << endl;
                         out.close();
-                        pthread_mutex_unlock(&lock);
+                        m_lock.unlock();
                     }
                     else
                         strcpy(m_url, "/registerError.html");
@@ -535,7 +533,7 @@ http_conn::HTTP_CODE http_conn::do_request()
                     //关闭管道的读端
                     close(pipefd[0]);
                     //父进程去执行cgi程序，m_real_file,name,password为输入
-                    execl(m_real_file, name, password,  "./CGImysql/id_passwd.txt","1", NULL);
+                    execl(m_real_file, name, password, "./CGImysql/id_passwd.txt", "1", NULL);
                 }
                 else
                 {
@@ -586,11 +584,12 @@ http_conn::HTTP_CODE http_conn::do_request()
             {
                 //标准输出，文件描述符是1，然后将输出重定向到管道写端
                 dup2(pipefd[1], 1);
+
                 //关闭管道的读端
                 close(pipefd[0]);
-                //父进程去执行cgi程序，m_real_file,name,password为输入
-                //./check.cgi name password
-                execl(m_real_file, &flag, name, password, "2",NULL);
+
+                //父进程去执行cgi程序
+                execl(m_real_file, &flag, name, password, "2", sql_user, sql_passwd, sql_name, NULL);
             }
             else
             {
@@ -606,9 +605,9 @@ http_conn::HTTP_CODE http_conn::do_request()
                 }
                 if (flag == '2')
                 {
-                    //printf("登录检测\n");
                     LOG_INFO("%s", "登录检测");
                     Log::get_instance()->flush();
+
                     //当用户名和密码正确，则显示welcome界面，否则显示错误界面
                     if (result == '1')
                         strcpy(m_url, "/welcome.html");
@@ -619,6 +618,7 @@ http_conn::HTTP_CODE http_conn::do_request()
                 {
                     LOG_INFO("%s", "注册检测");
                     Log::get_instance()->flush();
+
                     //当成功注册后，则显示登陆界面，否则显示错误界面
                     if (result == '1')
                         strcpy(m_url, "/log.html");
@@ -676,10 +676,13 @@ http_conn::HTTP_CODE http_conn::do_request()
 
     if (stat(m_real_file, &m_file_stat) < 0)
         return NO_RESOURCE;
+
     if (!(m_file_stat.st_mode & S_IROTH))
         return FORBIDDEN_REQUEST;
+
     if (S_ISDIR(m_file_stat.st_mode))
         return BAD_REQUEST;
+
     int fd = open(m_real_file, O_RDONLY);
     m_file_address = (char *)mmap(0, m_file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
@@ -710,12 +713,12 @@ bool http_conn::write()
     {
         temp = writev(m_sockfd, m_iv, m_iv_count);
 
-        if (temp > 0)
+        if (temp >= 0)
         {
             bytes_have_send += temp;
             newadd = bytes_have_send - m_write_idx;
         }
-        if (temp <= -1)
+        else
         {
             if (errno == EAGAIN)
             {
@@ -779,8 +782,8 @@ bool http_conn::add_status_line(int status, const char *title)
 }
 bool http_conn::add_headers(int content_len)
 {
-    return add_content_length(content_len) && add_linger() && 
-    add_blank_line();
+    return add_content_length(content_len) && add_linger() &&
+           add_blank_line();
 }
 bool http_conn::add_content_length(int content_len)
 {

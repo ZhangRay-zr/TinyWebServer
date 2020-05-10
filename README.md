@@ -10,7 +10,14 @@ Linux下C++轻量级Web服务器，助力初学者快速实践网络编程，搭
 * 实现**同步/异步日志系统**，记录服务器运行状态
 * 经Webbench压力测试可以实现**上万的并发连接**数据交换
 
-模块概述
+目录
+-----
+
+| [概述](#概述) | [框架](#框架) | [Demo演示](#Demo演示) | [压力测试](#压力测试) |[更新与下载](#更新与下载) | [快速运行](#快速运行) | [个性化运行](#个性化运行) | [庖丁解牛](#庖丁解牛) | [致谢](#致谢) |
+|:--------:|:--------:|:--------:|:--------:|:--------:|:--------:|:--------:|:--------:|:--------:|
+
+
+概述
 ----------
 
 > * C/C++
@@ -24,8 +31,50 @@ Linux下C++轻量级Web服务器，助力初学者快速实践网络编程，搭
 > * [CGI及同步线程注册和登录校验](https://github.com/qinguoyi/TinyWebServer/tree/master/CGImysql) 
 > * [简易服务器压力测试](https://github.com/qinguoyi/TinyWebServer/tree/master/test_presure)
 
-Update
+
+框架
+-------------
+<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0j1atq5hj30g60lm0w4.jpg" height="765"/> </div>
+
+Demo演示
 ----------
+> * 注册演示
+
+<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0iz0dkleg30m80bxjyj.gif" height="429"/> </div>
+
+> * 登录演示
+
+<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0izcc0r1g30m80bxn6a.gif" height="429"/> </div>
+
+> * 请求图片文件演示(6M)
+
+<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0juxrnlfg30go07x4qr.gif" height="429"/> </div>
+
+> * 请求视频文件演示(39M)
+
+<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0jtxie8ng30go07xb2b.gif" height="429"/> </div>
+
+
+压力测试
+-------------
+在关闭日志后，使用Webbench对服务器进行压力测试，在ET非阻塞和LT阻塞模式下均可实现上万的并发连接. 
+
+> * ET非阻塞，57838 QPS
+
+<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1geme8se1a0j30f806qjun.jpg" height="201"/> </div>
+
+> * LT阻塞，64525 QPS
+
+<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1geme7wxpw3j30f906uadg.jpg" height="201"/> </div>
+
+> * 并发连接总数：10500
+> * 访问服务器时间：5s
+> * 所有访问均成功
+
+**注意：** 使用本项目的webbench进行压测时，若报错显示webbench命令找不到，将可执行文件webbench删除后，重新编译即可。
+
+更新与下载
+-------
 - [x] 解决请求服务器上大文件的Bug
 - [x] 增加请求视频文件的页面
 - [x] 解决数据库同步校验内存泄漏
@@ -37,9 +86,21 @@ Update
 - [x] 使用RAII机制优化数据库连接的获取与释放
 - [x] 优化代码结构，封装工具类以减少全局变量
 - [x] 编译一次即可，命令行进行个性化测试更加友好
+- [x] main函数封装重构
+- [x] 新增命令行日志开关，关闭日志后更新压力测试结果
+- [x] 改进编译方式，只配置一次SQL信息即可
 
+目前有两个版本，版本间的代码结构有较大改动，文档和代码运行方法也不一致. 重构版本更简洁，原始版本(raw_version)更大保留游双代码的原汁原味，从原始版本更容易入手.
 
-基础测试
+如果遇到github代码下载失败，或访问太慢，可以从以下链接下载，与Github最新提交同步.
+
+* 重构版本下载地址 : [BaiduYun](https://pan.baidu.com/s/18VZ3abq9sj4hUGkE4Hp_FQ)
+    * 提取码 : q5yc
+* 原始版本(raw_version)下载地址 : [BaiduYun](https://pan.baidu.com/s/1a-UfktwKrCMc73UvWGESMw)
+    * 提取码 : i9xt
+    * [原始版本文档](https://github.com/qinguoyi/TinyWebServer/tree/master/raw_version)
+
+快速运行
 ------------
 * 服务器测试环境
 	* Ubuntu版本16.04
@@ -70,15 +131,16 @@ Update
 * 修改main.c中的数据库初始化信息
 
     ```C++
-    // root root修改为服务器数据库的登录名和密码
-	// qgydb修改为上述创建的yourdb库名
-    connPool->init("localhost", "root", "root", "qgydb", 3306, 8);
+    //数据库登录名,密码,库名
+    string user = "root";
+    string passwd = "root";
+    string databasename = "yourdb";
     ```
 
-* 生成server
+* build
 
     ```C++
-    make server
+    sh ./build.sh
     ```
 
 * 启动server
@@ -93,49 +155,42 @@ Update
     ip:9006
     ```
 
-个性化测试
+个性化运行
 ------
 
 ```C++
-./server [-p port] [-s SQLVerify] [-l LOGWrite] [-t TRIGMode] [-o OPT_LINGER]
+./server [-p port] [-v SQLVerify] [-l LOGWrite] [-m TRIGMode] [-o OPT_LINGER] [-s sql_num] [-t thread_num] [-c close_log]
 ```
+
+温馨提示:以上参数不是非必须，不用全部使用，根据个人情况搭配选用即可.
 
 * -p，自定义端口号
 	* 默认9006
-* -s，选择数据库校验方式，默认同步校验
+* -v，选择数据库校验方式，默认同步校验
 	* 0，同步校验，使用连接池
 	* 1，CGI校验，使用连接池
 	* 2，CGI校验，不使用连接池
 * -l，选择日志写入方式，默认同步写入
 	* 0，同步写入
 	* 1，异步写入
-* -t，epoll的触发模式，默认使用LT
+* -m，epoll的触发模式，默认使用LT
 	* 0，表示使用LT
 	* 1，表示使用ET
 * -o，优雅关闭连接，默认不使用
 	* 0，不使用
 	* 1，使用
+* -s，数据库连接数量
+	* 默认为8
+* -t，线程数量
+	* 默认为8
+* -c，关闭日志，默认打开
+	* 0，打开日志
+	* 1，关闭日志
 
-若使用CGI数据库校验方式，按如下编译代码，若使用同步校验，则跳过下面修改与生成CGI步骤.
-
-* 修改sign.cpp中的数据库初始化信息
-
-    ```C++
-    // root root修改为服务器数据库的登录名和密码
-	// qgydb修改为上述创建的yourdb库名
-    con = mysql_real_connect(con, "localhost", "root", "root", "qgydb", 3306, NULL, 0);
-    ```
-
-* 生成CGISQL.cgi
-
-    ```C++
-    make CGISQL.cgi
-    ```
-
-* 测试示例命令与含义
+测试示例命令与含义
 
 ```C++
-./server -p 9007 -s 1 -l 1 -t 0 -o 1
+./server -p 9007 -v 1 -l 1 -m 0 -o 1 -s 10 -t 10 -c 1
 ```
 
 - [x] 端口9007
@@ -143,72 +198,28 @@ Update
 - [x] 异步写入日志
 - [x] 使用LT水平触发
 - [x] 使用优雅关闭连接
+- [x] 数据库连接池内有10条连接
+- [x] 线程池内有10条线程
+- [x] 关闭日志
 
-
-Demo
-----------
-> * 注册演示
-
-<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0iz0dkleg30m80bxjyj.gif" height="429"/> </div>
-
-> * 登录演示
-
-<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0izcc0r1g30m80bxn6a.gif" height="429"/> </div>
-
-> * 请求图片文件演示(6M)
-
-<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0juxrnlfg30go07x4qr.gif" height="429"/> </div>
-
-> * 请求视频文件演示(39M)
-
-<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0jtxie8ng30go07xb2b.gif" height="429"/> </div>
-
-
-压力测试
--------------
-Webbench对服务器进行压力测试，在ET非阻塞和LT阻塞模式下均可实现上万的并发连接. 这里以同步日志，不使用优雅关闭连接为例.
-
-> * ET非阻塞，18657 QPS
-
-<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1gejjt9plmfj30fm05fgnt.jpg" height="201"/> </div>
-
-> * LT阻塞，22868 QPS
-
-<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1gejjtn0judj30fj05htay.jpg" height="201"/> </div>
-
-> * 并发连接总数：10500
-> * 访问服务器时间：10s
-> * 所有访问均成功
-
-**注意：** 使用本项目的webbench进行压测时，若报错显示webbench命令找不到，将可执行文件webbench删除后，重新编译即可。
-
-
-框架
--------------
-<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0j1atq5hj30g60lm0w4.jpg" height="765"/> </div>
-
-
-web端界面
--------------
-
-> * 判断是否注册   
-> * 注册
-> * 注册失败提示
-> * 登录
-> * 登录失败提示
-
-
-<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0j1qt5w7j306i06w746.jpg" height="200"/>         <img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0j21iwi6j306306i3ye.jpg" height="200"/>         <img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0j2b44jgj306v075q2w.jpg" height="200"/></div>
-
-<div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0j2r5rnfj306j06ewed.jpg" height="200"/><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0j30o0wpj308n07cq2y.jpg" height="200"/></div>
-
-
-反馈
+庖丁解牛
 ------------
-请关注公众号 **“两猿社”**，**项目模块庖丁解牛，公众号内持续更新.**
+* [最新版Web服务器项目详解 - 01 线程同步机制封装类](https://mp.weixin.qq.com/s?__biz=MzAxNzU2MzcwMw==&mid=2649274278&idx=3&sn=5840ff698e3f963c7855d702e842ec47&chksm=83ffbefeb48837e86fed9754986bca6db364a6fe2e2923549a378e8e5dec6e3cf732cdb198e2&scene=0&xtrack=1#rd)
+* [最新版Web服务器项目详解 - 02 半同步半反应堆线程池（上）](https://mp.weixin.qq.com/s?__biz=MzAxNzU2MzcwMw==&mid=2649274278&idx=4&sn=caa323faf0c51d882453c0e0c6a62282&chksm=83ffbefeb48837e841a6dbff292217475d9075e91cbe14042ad6e55b87437dcd01e6d9219e7d&scene=0&xtrack=1#rd)
+* [最新版Web服务器项目详解 - 03 半同步半反应堆线程池（下）](https://mp.weixin.qq.com/s/PB8vMwi8sB4Jw3WzAKpWOQ)
+* [最新版Web服务器项目详解 - 04 http连接处理（上）](https://mp.weixin.qq.com/s/BfnNl-3jc_x5WPrWEJGdzQ)
+* [最新版Web服务器项目详解 - 05 http连接处理（中）](https://mp.weixin.qq.com/s/wAQHU-QZiRt1VACMZZjNlw)
+* [最新版Web服务器项目详解 - 06 http连接处理（下）](https://mp.weixin.qq.com/s/451xNaSFHxcxfKlPBV3OCg)
+* [最新版Web服务器项目详解 - 07 定时器处理非活动连接（上）](https://mp.weixin.qq.com/s/mmXLqh_NywhBXJvI45hchA)
+* [最新版Web服务器项目详解 - 08 定时器处理非活动连接（下）](https://mp.weixin.qq.com/s/fb_OUnlV1SGuOUdrGrzVgg)
+* [最新版Web服务器项目详解 - 09 日志系统（上）](https://mp.weixin.qq.com/s/IWAlPzVDkR2ZRI5iirEfCg)
+* [最新版Web服务器项目详解 - 10 日志系统（下）](https://mp.weixin.qq.com/s/f-ujwFyCe1LZa3EB561ehA)
+* 持续更新ing...
 
 <div align=center><img src="http://ww1.sinaimg.cn/large/005TJ2c7ly1ge0j3jrepyj30ij0cvjt8.jpg" height="350"/> </div>
 
 致谢
 ------------
 Linux高性能服务器编程，游双著.
+
+感谢以下朋友的PR和帮助: [RownH](https://github.com/RownH)，[ZWiley](https://github.com/ZWiley)，[zjuHong](https://github.com/zjuHong)，[mamil](https://github.com/mamil)，[byfate](https://github.com/byfate).
