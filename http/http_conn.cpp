@@ -1,5 +1,5 @@
 #include "http_conn.h"
-#include "../log/log.h"
+
 #include <mysql/mysql.h>
 #include <fstream>
 
@@ -15,8 +15,9 @@ const char *error_500_title = "Internal Error";
 const char *error_500_form = "There was an unusual problem serving the request file.\n";
 
 locker m_lock;
+map<string, string> users;
 
-void http_conn::initmysql_result(connection_pool *connPool, map<string, string> &users)
+void http_conn::initmysql_result(connection_pool *connPool)
 {
     //先从连接池中取一个连接
     MYSQL *mysql = NULL;
@@ -46,7 +47,7 @@ void http_conn::initmysql_result(connection_pool *connPool, map<string, string> 
     }
 }
 
-void http_conn::initresultFile(connection_pool *connPool, map<string, string> &users)
+void http_conn::initresultFile(connection_pool *connPool)
 {
     ofstream out("./CGImysql/id_passwd.txt");
     //先从连接池中取一个连接
@@ -135,6 +136,7 @@ void http_conn::close_conn(bool real_close)
 {
     if (real_close && (m_sockfd != -1))
     {
+        printf("close %d\n", m_sockfd);
         removefd(m_epollfd, m_sockfd);
         m_sockfd = -1;
         m_user_count--;
@@ -142,7 +144,7 @@ void http_conn::close_conn(bool real_close)
 }
 
 //初始化连接,外部调用初始化套接字地址
-void http_conn::init(int sockfd, const sockaddr_in &addr, char *root, map<string, string> &users, int SQLVerify, int TRIGMode,
+void http_conn::init(int sockfd, const sockaddr_in &addr, char *root, int SQLVerify, int TRIGMode,
                      int close_log, string user, string passwd, string sqlname)
 {
     m_sockfd = sockfd;
@@ -153,7 +155,6 @@ void http_conn::init(int sockfd, const sockaddr_in &addr, char *root, map<string
 
     //当浏览器出现连接重置时，可能是网站根目录出错或http响应格式出错或者访问的文件中内容完全为空
     doc_root = root;
-    m_users = users;
     m_SQLVerify = SQLVerify;
     m_TRIGMode = TRIGMode;
     m_close_log = close_log;
@@ -184,6 +185,9 @@ void http_conn::init()
     m_read_idx = 0;
     m_write_idx = 0;
     cgi = 0;
+    m_state = 0;
+    timer_flag = 0;
+    improv = 0;
 
     memset(m_read_buf, '\0', READ_BUFFER_SIZE);
     memset(m_write_buf, '\0', WRITE_BUFFER_SIZE);
@@ -335,7 +339,6 @@ http_conn::HTTP_CODE http_conn::parse_headers(char *text)
     else
     {
         LOG_INFO("oop!unknow header: %s", text);
-        Log::get_instance()->flush();
     }
     return NO_REQUEST;
 }
@@ -364,7 +367,6 @@ http_conn::HTTP_CODE http_conn::process_read()
         text = get_line();
         m_start_line = m_checked_idx;
         LOG_INFO("%s", text);
-        Log::get_instance()->flush();
         switch (m_check_state)
         {
         case CHECK_STATE_REQUESTLINE:
@@ -447,11 +449,11 @@ http_conn::HTTP_CODE http_conn::do_request()
                 strcat(sql_insert, password);
                 strcat(sql_insert, "')");
 
-                if (m_users.find(name) == m_users.end())
+                if (users.find(name) == users.end())
                 {
                     m_lock.lock();
                     int res = mysql_query(mysql, sql_insert);
-                    m_users.insert(pair<string, string>(name, password));
+                    users.insert(pair<string, string>(name, password));
                     m_lock.unlock();
 
                     if (!res)
@@ -466,7 +468,7 @@ http_conn::HTTP_CODE http_conn::do_request()
             //若浏览器端输入的用户名和密码在表中可以查找到，返回1，否则返回0
             else if (*(p + 1) == '2')
             {
-                if (m_users.find(name) != m_users.end() && m_users[name] == password)
+                if (users.find(name) != users.end() && users[name] == password)
                     strcpy(m_url, "/welcome.html");
                 else
                     strcpy(m_url, "/logError.html");
@@ -487,11 +489,11 @@ http_conn::HTTP_CODE http_conn::do_request()
                 strcat(sql_insert, password);
                 strcat(sql_insert, "')");
 
-                if (m_users.find(name) == m_users.end())
+                if (users.find(name) == users.end())
                 {
                     m_lock.lock();
                     int res = mysql_query(mysql, sql_insert);
-                    m_users.insert(pair<string, string>(name, password));
+                    users.insert(pair<string, string>(name, password));
                     m_lock.unlock();
 
                     if (!res)
@@ -549,7 +551,7 @@ http_conn::HTTP_CODE http_conn::do_request()
                     }
 
                     LOG_INFO("%s", "登录检测");
-                    Log::get_instance()->flush();
+
                     //当用户名和密码正确，则显示welcome界面，否则显示错误界面
                     if (result == '1')
                         strcpy(m_url, "/welcome.html");
@@ -606,7 +608,7 @@ http_conn::HTTP_CODE http_conn::do_request()
                 if (flag == '2')
                 {
                     LOG_INFO("%s", "登录检测");
-                    Log::get_instance()->flush();
+
 
                     //当用户名和密码正确，则显示welcome界面，否则显示错误界面
                     if (result == '1')
@@ -617,7 +619,6 @@ http_conn::HTTP_CODE http_conn::do_request()
                 else if (flag == '3')
                 {
                     LOG_INFO("%s", "注册检测");
-                    Log::get_instance()->flush();
 
                     //当成功注册后，则显示登陆界面，否则显示错误界面
                     if (result == '1')
@@ -772,8 +773,9 @@ bool http_conn::add_response(const char *format, ...)
     }
     m_write_idx += len;
     va_end(arg_list);
+    
     LOG_INFO("request:%s", m_write_buf);
-    Log::get_instance()->flush();
+
     return true;
 }
 bool http_conn::add_status_line(int status, const char *title)
